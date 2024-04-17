@@ -1,0 +1,37 @@
+version: "3.11"
+
+services:
+   postgres:
+      image: postgres:latest
+      restart: always
+      environment:
+         POSTGRES_PASSWORD: postgres
+         POSTGRES_USER: postgres
+         POSTGRES_DB: postgres
+         PGDATA: /var/lib/postgresql/data
+      ports:
+         - "5432:5432"
+      volumes:
+         - ./volumes/db/data:/var/lib/postgresql/data
+         - ./volumes/db/log:/var/log/postgresql
+      healthcheck:
+         test: [ "CMD-SHELL", "pg_isready" ]
+         interval: 10s
+         timeout: 5s
+         retries: 20
+
+   bot:
+      build: .
+      restart: always
+      environment:
+         - BOT_TOKEN=${BOT_TOKEN}
+         - POSTGRES_CONN=postgresql://postgres:postgres@postgres:5432/postgres
+         - YANDEX_S3_ID=${YANDEX_S3_ID}
+         - YANDEX_S3_SECRET=${YANDEX_S3_SECRET}
+         - S3_ENDPOINT=https://storage.yandexcloud.net
+      depends_on:
+         postgres:
+            condition: service_healthy
+
+volumes:
+   postgres-data:
