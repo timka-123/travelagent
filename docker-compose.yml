@@ -23,12 +23,13 @@ services:
    bot:
       build: .
       restart: always
+      env_file: .env
       environment:
          - BOT_TOKEN=${BOT_TOKEN}
-         - POSTGRES_CONN=postgresql://postgres:postgres@postgres:5432/postgres
-         - YANDEX_S3_ID=${YANDEX_S3_ID}
-         - YANDEX_S3_SECRET=${YANDEX_S3_SECRET}
-         - S3_ENDPOINT=https://storage.yandexcloud.net
+         - POSTGRES_CONN=${POSTGRES_CONN}
+         - YANDEX_S3_ID=${S3_ID}
+         - YANDEX_S3_SECRET=${S3_SECRET}
+         - S3_ENDPOINT=${S3_URL}
       depends_on:
          postgres:
             condition: service_healthy

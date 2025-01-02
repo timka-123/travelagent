@@ -32,7 +32,7 @@ def load_config():
         bot=bot,
         dp=dp,
         s3_client=s3,
-        s3_baseurl="https://taprod.storage.yandexcloud.net"
+        s3_baseurl=environ.get("S3_ENDPOINT"),
     )
 
 
