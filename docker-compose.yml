@@ -30,6 +30,7 @@ services:
          - YANDEX_S3_ID=${S3_ID}
          - YANDEX_S3_SECRET=${S3_SECRET}
          - S3_ENDPOINT=${S3_URL}
+         - YANDEX_SCHEDULE_API_KEY=${YANDEX_SCHEDULE_API_KEY}
       depends_on:
          postgres:
             condition: service_healthy

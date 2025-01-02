@@ -2,3 +2,5 @@ from .states import RegisterStates, TravelCreateStates, TravelEditStates, Locati
     AddFriendsStates, NoteCreateStates, NoteEditStates, ProfileEditStates
 from .openstreetmaps import OpenStreetMapsClient
 from .dates import string2date
+from .yandex_schedules import YandexSchedule
+from .aviasales import Aviasales

@@ -8,7 +8,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.orm import create_session
 
 from database import engine, Travel, Location
-from utils import TravelEditStates
+from utils import TravelEditStates, YandexSchedule, Aviasales
+from config import config
 
 router = Router()
 
@@ -36,7 +37,7 @@ async def travel_info(call: CallbackQuery, state: FSMContext):
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="📍 Маршрут", callback_data=f"marshrut|{travel_id}")
+        InlineKeyboardButton(text="✈️ Найди авиабилеты", callback_data=f"aviamarshrut|{travel_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="📝 Изменть название", callback_data=f"tedit|name|{travel_id}"),
@@ -98,7 +99,7 @@ async def send_menu(message: Message, travel_id: int, travel: Travel, locations:
         loc_string += (f"#{index} - {location.place}.\nНачало: <code>{location.date_start.strftime('%m/%d/%Y')}</code"
                        f">. Окончание: <code>{location.date_end.strftime('%m/%d/%Y')}</code>\n\n")
     builder.row(
-        InlineKeyboardButton(text="📍 Маршрут", callback_data=f"marshrut|{travel_id}")
+        InlineKeyboardButton(text="✈️ Найди авиабилеты", callback_data=f"aviamarshrut|{travel_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="📝 Изменить название", callback_data=f"tedit|name|{travel_id}"),
@@ -127,9 +128,6 @@ async def send_menu(message: Message, travel_id: int, travel: Travel, locations:
     """,
         reply_markup=builder.as_markup()
     )
-
-
-
 
 
 @router.message(TravelEditStates.ENTER_NAME)
@@ -192,3 +190,32 @@ async def marshrut_callback(call: CallbackQuery):
         caption="💠 Ваш маршрут готов!"
     )
 
+
+@router.callback_query(F.data.startswith("aviamarshrut|"))
+async def avia_marshrut(call: CallbackQuery):
+    msg = await call.message.answer("<i>⏳ Ищу подходящие авиабилеты, это займет некоторое время</i>")
+    travel_id = int(call.data.split("|")[1])
+    session = create_session(engine)
+
+    locations = session.query(Location).filter_by(travel=travel_id).order_by(Location.date_start).all()
+    session.close()
+
+    if len(locations) != 2:
+        return await msg.edit_text("❌ Увы, я пока что не могу строить маршруты больше, чем на 2 точки")
+    
+    aviasales = Aviasales()
+
+    builder = InlineKeyboardBuilder()
+
+    tickets = await aviasales.get_tickets(locations[0].place, locations[1].place)
+    for ticket in tickets:
+        flight = ticket['segments'][0]['flight_legs'][0]
+        builder.row(
+            InlineKeyboardButton(text=f"{flight['origin']} -> {flight['destination']} ({flight['local_depart_date']} {flight['local_depart_time']})", 
+                                 url=f"https://aviasales.ru/search{ticket['ticket_link']}")
+        )
+    
+    await msg.edit_text(
+        text="✈️ Собрал подборку авиабилетов. Авиасейлс - самые дешевые авиабилеты!",
+        reply_markup=builder.as_markup()
+    )

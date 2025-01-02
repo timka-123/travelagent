@@ -4,6 +4,10 @@ from boto3.session import Session
 
 from aiogram import Bot, Dispatcher
 from botocore.client import BaseClient
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 @dataclass
@@ -12,6 +16,7 @@ class Config:
     dp: Dispatcher
     s3_client: BaseClient
     s3_baseurl: str
+    yandex_schedule_api_key: str
 
 
 def load_config():
@@ -33,6 +38,7 @@ def load_config():
         dp=dp,
         s3_client=s3,
         s3_baseurl=environ.get("S3_ENDPOINT"),
+        yandex_schedule_api_key=environ.get("YANDEX_SCHEDULE_API_KEY")
     )
 
 
