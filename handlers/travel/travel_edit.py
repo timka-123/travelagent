@@ -37,7 +37,7 @@ async def travel_info(call: CallbackQuery, state: FSMContext):
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✈️ Найди авиабилеты", callback_data=f"aviamarshrut|{travel_id}"),
+        InlineKeyboardButton(text="✈️ Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="📝 Изменть название", callback_data=f"tedit|name|{travel_id}"),
@@ -99,7 +99,7 @@ async def send_menu(message: Message, travel_id: int, travel: Travel, locations:
         loc_string += (f"#{index} - {location.place}.\nНачало: <code>{location.date_start.strftime('%m/%d/%Y')}</code"
                        f">. Окончание: <code>{location.date_end.strftime('%m/%d/%Y')}</code>\n\n")
     builder.row(
-        InlineKeyboardButton(text="✈️ Найди авиабилеты", callback_data=f"aviamarshrut|{travel_id}"),
+        InlineKeyboardButton(text="✈️ Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="📝 Изменить название", callback_data=f"tedit|name|{travel_id}"),
@@ -188,6 +188,31 @@ async def marshrut_callback(call: CallbackQuery):
     await call.message.answer_photo(
         photo=photo,
         caption="💠 Ваш маршрут готов!"
+    )
+
+
+@router.callback_query(F.data.startswith("trainmarshrut|"))
+async def make_train_marshrut(call: CallbackQuery):
+    msg = await call.message.answer("<i>⏳ Ищу подходящие выгодные варианты, пожалуйста, подождите...</i>")
+    travel_id = int(call.data.split("|")[1])
+    session = create_session(engine)
+
+    locations = session.query(Location).filter_by(travel=travel_id).order_by(Location.date_start).all()
+    session.close()
+
+    if len(locations) != 2:
+        return await msg.edit_text("❌ Увы, я пока что не могу строить маршруты больше, чем на 2 точки")
+    
+    schedule = YandexSchedule(config.yandex_schedule_api_key)
+    variants = await schedule.get_trains(locations[0].place, locations[1].place, locations[0].date_end)
+    builder = InlineKeyboardBuilder()
+    for variant in variants[:5]:
+        builder.row(
+            InlineKeyboardButton(text=variant['title'], url=variant['link'])
+        )
+    await msg.edit_text(
+        text="🚂 Нашел выгодные варианты, попробуйте!",
+        reply_markup=builder.as_markup()
     )
 
 
