@@ -281,8 +281,9 @@ async def selected_variant(call: CallbackQuery, state: FSMContext):
                 InlineKeyboardButton(text=title, url=link)
             )
         await call.message.edit_text(
-            text="✅ Все, закончили! Ниже находятся ссылки на покупку выбранных билетов",
-            reply_markup=builder.as_markup()
+            text='✅ Все, закончили! Ниже находятся ссылки на покупку выбранных билетов\n\nДанная функция работает по API сервисов <a href="https://rasp.yandex.ru">Яндекс.Расписание</a> и <a href="https://travel.yandex.ru">Яндекс.Путешествия</a>',
+            reply_markup=builder.as_markup(),
+            disable_web_page_preview=True
         )
         return
     elif len(selected_variants) == len(locations):
