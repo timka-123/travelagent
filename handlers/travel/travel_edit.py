@@ -1,6 +1,6 @@
 import random
 import string
-from typing import List
+from typing import List, Literal
 
 import staticmaps
 from aiogram import Router, F
@@ -40,7 +40,8 @@ async def travel_info(call: CallbackQuery, state: FSMContext):
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✈️ Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
+        InlineKeyboardButton(text="✈️ Найти самолеты", callback_data=f"aviamarshrut|{travel_id}"),
+        InlineKeyboardButton(text="🚂 Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="📝 Изменть название", callback_data=f"tedit|name|{travel_id}"),
@@ -102,7 +103,8 @@ async def send_menu(message: Message, travel_id: int, travel: Travel, locations:
         loc_string += (f"#{index} - {location.place}.\nНачало: <code>{location.date_start.strftime('%m/%d/%Y')}</code"
                        f">. Окончание: <code>{location.date_end.strftime('%m/%d/%Y')}</code>\n\n")
     builder.row(
-        InlineKeyboardButton(text="✈️ Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
+        InlineKeyboardButton(text="✈️ Найти самолеты", callback_data=f"aviamarshrut|{travel_id}"),
+        InlineKeyboardButton(text="🚂 Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
     )
     builder.row(
         InlineKeyboardButton(text="📝 Изменить название", callback_data=f"tedit|name|{travel_id}"),
@@ -194,6 +196,33 @@ async def marshrut_callback(call: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("aviamarshrut|"))
+async def make_avia_marshrut(call: CallbackQuery, state: FSMContext):
+    msg = await call.message.answer("<i>⏳ Ищу подходящие выгодные варианты, пожалуйста, подождите...</i>")
+    travel_id = int(call.data.split("|")[1])
+    session = create_session(engine)
+
+    locations = session.query(Location).filter_by(travel=travel_id).order_by(Location.date_start).all()
+    user = session.get(User, call.from_user.id)
+    session.close()
+    
+    schedule = YandexSchedule(config.yandex_schedule_api_key)
+    variants = await schedule.get_avia(user.city, locations[0].place, locations[0].date_start)
+    builder = InlineKeyboardBuilder()
+    variants_dict = {}
+    for variant in variants[:5]:
+        variants_dict[variant['title']] = variant['link']
+        builder.row(
+            InlineKeyboardButton(text=variant['title'], callback_data=f"smv|avia|{travel_id}|{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}")
+        )
+    await msg.edit_text(
+        text="✈️ Нашел выгодные варианты, попробуйте!",
+        reply_markup=builder.as_markup()
+    )
+    await state.update_data(all_variants=variants_dict, next_ind=1, curr_ind=0, selected_variants={})
+    await state.set_state(SelectedVariant.ENTER_VARIANT)
+
+
 @router.callback_query(F.data.startswith("trainmarshrut|"))
 async def make_train_marshrut(call: CallbackQuery, state: FSMContext):
     msg = await call.message.answer("<i>⏳ Ищу подходящие выгодные варианты, пожалуйста, подождите...</i>")
@@ -226,6 +255,7 @@ async def selected_variant(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     travel_id = int(call.data.split("|")[-2])
     selected_variants: dict[str, str] = data['selected_variants']
+    marshrut_type: Literal['avia', 'train'] = call.data.split("|")[1]
     all_variants: dict[str, str] = data['all_variants']
     next_ind: int = data['next_ind']
     curr_ind: int = data['curr_ind']
@@ -243,6 +273,7 @@ async def selected_variant(call: CallbackQuery, state: FSMContext):
 
     builder = InlineKeyboardBuilder()
     send_new_message = False
+    changed_marshrut_type = False
 
     if len(selected_variants) == len(locations) + 1:
         for title, link in selected_variants.items():
@@ -267,22 +298,36 @@ async def selected_variant(call: CallbackQuery, state: FSMContext):
         second_place = locations[next_ind].place
     
     schedule = YandexSchedule(config.yandex_schedule_api_key)
-    variants = await schedule.get_trains(first_place, second_place, locations[curr_ind].date_end)
+    if marshrut_type == "train":
+        variants = await schedule.get_trains(first_place, second_place, locations[curr_ind].date_end)
+    else:
+        variants = await schedule.get_avia(first_place, second_place, locations[curr_ind].date_end)
+    if not variants:
+        changed_marshrut_type = True
+        if marshrut_type == "train":
+            variants = await schedule.get_avia(first_place, second_place, locations[curr_ind].date_end)
+        else:
+            variants = await schedule.get_trains(first_place, second_place, locations[curr_ind].date_end)
+    if not variants:
+        await call.message.edit_text(
+            text=f"😔 Не удалось найти маршрут по направлению <b>{first_place} -> {second_place}</b> через агрегаторы авиа и ж/д билетов."
+        )
+        return
     for variant in variants[:5]:
         all_variants[variant['title']] = variant['link']
         builder.row(
-            InlineKeyboardButton(text=variant['title'], callback_data=f"smv|train|{travel_id}|{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}")
+            InlineKeyboardButton(text=variant['title'], callback_data=f"smv|{marshrut_type}|{travel_id}|{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}")
         )
     if send_new_message:
         await call.message.answer(
-            text="🚂 Продолжаем...",
+            text=f"⏳ Продолжаем...\n\n{'Мы были вынуждены изменить тип транспорта, так как мы не нашли билетов на выбранный тип.' if changed_marshrut_type else ''}",
             reply_markup=builder.as_markup()
         )
     else:
         await call.message.edit_text(
-            text="🚂 Продолжаем...",
+            text=f"⏳ Продолжаем...\n\n{'Мы были вынуждены изменить тип транспорта, так как мы не нашли билетов на выбранный тип.' if changed_marshrut_type else ''}",
             reply_markup=builder.as_markup()
         )
-    await call.answer("✅ Понял. Выбирайте дальше.")
+    await call.answer("✅ Понял. Можете выбирать дальше.")
     await state.update_data(selected_variants=selected_variants, next_ind=next_ind + 1, 
                             curr_ind=next_ind, all_variants=all_variants)

@@ -67,7 +67,7 @@ class YandexSchedule:
         resp = await response.json()
         return resp[1][0][3], resp[1][0][0]
     
-    async def get_context(self, from_name: str, to_name: str) -> Any:
+    async def get_context(self, from_name: str, to_name: str, transport_type: str = "train") -> Any:
         from_slug, from_code = await self.get_slug_name(from_name)
         to_slug, to_code = await self.get_slug_name(to_name)
         data = {
@@ -76,7 +76,7 @@ class YandexSchedule:
                 "params": {
                     "tld": "ru",
                     "language": "ru",
-                    "transportType": "all",
+                    "transportType": transport_type,
                     "fromSlug": from_slug,
                     "fromKey": from_code,
                     "fromTitle": from_name,
@@ -91,7 +91,7 @@ class YandexSchedule:
             json=data
         )
         resp_data = await response.json()
-        return resp_data[0]['data']
+        return resp_data['data'][0]['data']
     
     async def get_trains(self, from_name: str, to_name: str, date_of_dep: date) -> list[dict]:
         from_slug, from_code = await self.get_slug_name(from_name)
@@ -149,10 +149,13 @@ class YandexSchedule:
             })
         return items
 
-    async def get_avia(self, from_name: str, to_name: str) -> list[str]:
-        from_city = await self.get_nearest_station(from_name)
-        to_city = await self.get_nearest_station(to_name)
-        context = await self.get_context(from_name, to_name)
+    async def get_avia(self, from_name: str, to_name: str, dep_date: date) -> list[dict]:
+        from_slug, from_code = await self.get_slug_name(from_name)
+        to_slug, to_code = await self.get_slug_name(to_name)
+        context = await self.get_context(from_name, to_name, "all")
+        dep_datetime = datetime(
+            year=dep_date.year, month=dep_date.month, day=dep_date.day, hour=0, second=0, minute=0
+        )
         data = {
             "methods": [{
                 "method": "startPlaneQuerying",
@@ -161,12 +164,12 @@ class YandexSchedule:
                         "userInput": {
                             "from": {
                                 "title": from_name,
-                                "key": from_city.code,
+                                "key": from_code,
                                 "slug": context['from']['slug']
                             },
                             "to": {
                                 "title": to_name,
-                                "key": to_city.code,
+                                "key": to_code,
                                 "slug": context['to']['slug']
                             }
                         },
@@ -176,8 +179,66 @@ class YandexSchedule:
                         "to": context['to'],
                         "originalTo": context['to'],
                         "searchNext": False,
-
-                    }
+                        "when": {
+                            "text": "",
+                            "hint": "",
+                            "date": f"{dep_datetime.strftime('%Y-%m-%d')}",
+                            "formatted": "",
+                            "shortFormatted": "",
+                            "nextDate": f"{(dep_datetime + timedelta(days=1)).strftime('%Y-%m-%d')}"
+                        },
+                        "time": {
+                            "now": int(datetime.now().timestamp() * 1000),
+                            "timezone": "Europe/Moscow"
+                        },
+                        "language": "ru",
+                        "searchForPastDate": False,
+                        "sameSuburbanZone": context['sameSuburbanZone'],
+                        "distance": context["distance"]
+                    },
+                    "nationalVersion": "ru",
+                    "clientSettlementId": to_code.replace("c", ""),
+                    "poll": False
                 }
             }]
         }
+        resp = await self.session.post(
+            url=self.private_api_url,
+            json=data
+        )
+        resp_data = await resp.json()
+        qid = resp_data['data'][0]['data']['planeQIds']['qids'][0]
+
+        data2 = {
+            "methods": [
+                {
+                    "method": "planeTariffs",
+                    "params": {
+                        "qid": qid,
+                        "skip_partners": [],
+                        "language": "ru"
+                    }
+                }
+            ]
+        }
+        resp2 = await self.session.post(
+            url=self.private_api_url,
+            json=data2
+        )
+        plane_tarifs_json = await resp2.json()
+        plane_tarifs = plane_tarifs_json['data'][0]['data']['planeTariffs']['segments']
+        out_data = []
+        for plane_tarif in plane_tarifs:
+            prices = plane_tarif['tariffs']['classes']
+            best_price = 10**19
+            url = ""
+            for tarif_name, price_obj in prices.items():
+                if price_obj['price']['value'] < best_price:
+                    best_price = price_obj['price']['value']
+                    url = price_obj['deepUrl']
+            out_data.append({
+                "title": f"{plane_tarif['title']} {datetime.fromisoformat(plane_tarif['departure']).strftime('%d/%m/%Y, %H:%M')} - {plane_tarif['number']} - {best_price} руб.",
+                "link": url
+            })
+        return out_data
+        
