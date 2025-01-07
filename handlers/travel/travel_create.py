@@ -138,8 +138,6 @@ async def process_time(message: Message, state: FSMContext):
         timezone = pytz.timezone(timezone_str)
         offset = timezone.utcoffset(start_date).total_seconds()
 
-
-
         # add location
         session = create_session(engine)
         user = session.get(User, message.from_user.id)
@@ -167,27 +165,7 @@ async def process_time(message: Message, state: FSMContext):
             place=data['city']
         )
 
-        # parse timezone
-        tf = timezonefinder.TimezoneFinder()
-        timezone_str = tf.certain_timezone_at(lat=current_city.lat, lng=current_city.lon)
-        timezone = pytz.timezone(timezone_str)
-        offset = timezone.utcoffset(start_date).total_seconds()
-
-        user_location = Location(
-            date_start=datetime.datetime.now(),
-            date_end=start_date,
-            timezone=offset,
-            travel=travel.id,
-            user=message.from_user.id,
-            lat=current_city.lat,
-            lon=current_city.lon,
-            place=current_city.city_name
-        )
-
-        session.add(user_location)
         session.add(location)
-        session.commit()
-
         session.commit()
 
         session.close()
