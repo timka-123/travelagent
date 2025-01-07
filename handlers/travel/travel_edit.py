@@ -1,3 +1,5 @@
+import random
+import string
 from typing import List
 
 import staticmaps
@@ -8,7 +10,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.orm import create_session
 
 from database import engine, Travel, Location
-from utils import TravelEditStates, YandexSchedule, Aviasales
+from database.models.users import User
+from utils import TravelEditStates, YandexSchedule, Aviasales, SelectedVariant
 from config import config
 
 router = Router()
@@ -192,55 +195,94 @@ async def marshrut_callback(call: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("trainmarshrut|"))
-async def make_train_marshrut(call: CallbackQuery):
+async def make_train_marshrut(call: CallbackQuery, state: FSMContext):
     msg = await call.message.answer("<i>⏳ Ищу подходящие выгодные варианты, пожалуйста, подождите...</i>")
     travel_id = int(call.data.split("|")[1])
     session = create_session(engine)
 
     locations = session.query(Location).filter_by(travel=travel_id).order_by(Location.date_start).all()
+    user = session.get(User, call.from_user.id)
     session.close()
-
-    if len(locations) != 2:
-        return await msg.edit_text("❌ Увы, я пока что не могу строить маршруты больше, чем на 2 точки")
     
     schedule = YandexSchedule(config.yandex_schedule_api_key)
-    variants = await schedule.get_trains(locations[0].place, locations[1].place, locations[0].date_end)
+    variants = await schedule.get_trains(user.city, locations[0].place, locations[0].date_start)
     builder = InlineKeyboardBuilder()
+    variants_dict = {}
     for variant in variants[:5]:
+        variants_dict[variant['title']] = variant['link']
         builder.row(
-            InlineKeyboardButton(text=variant['title'], url=variant['link'])
+            InlineKeyboardButton(text=variant['title'], callback_data=f"smv|train|{travel_id}|{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}")
         )
     await msg.edit_text(
         text="🚂 Нашел выгодные варианты, попробуйте!",
         reply_markup=builder.as_markup()
     )
+    await state.update_data(all_variants=variants_dict, next_ind=1, curr_ind=0, selected_variants={})
+    await state.set_state(SelectedVariant.ENTER_VARIANT)
 
 
-@router.callback_query(F.data.startswith("aviamarshrut|"))
-async def avia_marshrut(call: CallbackQuery):
-    msg = await call.message.answer("<i>⏳ Ищу подходящие авиабилеты, это займет некоторое время</i>")
-    travel_id = int(call.data.split("|")[1])
+@router.callback_query(F.data.startswith("smv"), SelectedVariant.ENTER_VARIANT)
+async def selected_variant(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    travel_id = int(call.data.split("|")[-2])
+    selected_variants: dict[str, str] = data['selected_variants']
+    all_variants: dict[str, str] = data['all_variants']
+    next_ind: int = data['next_ind']
+    curr_ind: int = data['curr_ind']
+
+    for button in call.message.reply_markup.inline_keyboard:
+        button = button[0]
+        if button.callback_data == call.data:
+            selected_variants[button.text] = all_variants[button.text]
+
     session = create_session(engine)
 
     locations = session.query(Location).filter_by(travel=travel_id).order_by(Location.date_start).all()
+    user = session.get(User, call.from_user.id)
     session.close()
 
-    if len(locations) != 2:
-        return await msg.edit_text("❌ Увы, я пока что не могу строить маршруты больше, чем на 2 точки")
-    
-    aviasales = Aviasales()
-
     builder = InlineKeyboardBuilder()
+    send_new_message = False
 
-    tickets = await aviasales.get_tickets(locations[0].place, locations[1].place)
-    for ticket in tickets:
-        flight = ticket['segments'][0]['flight_legs'][0]
-        builder.row(
-            InlineKeyboardButton(text=f"{flight['origin']} -> {flight['destination']} ({flight['local_depart_date']} {flight['local_depart_time']})", 
-                                 url=f"https://aviasales.ru/search{ticket['ticket_link']}")
+    if len(selected_variants) == len(locations) + 1:
+        for title, link in selected_variants.items():
+            builder.row(
+                InlineKeyboardButton(text=title, url=link)
+            )
+        await call.message.edit_text(
+            text="✅ Все, закончили! Ниже находятся ссылки на покупку выбранных билетов",
+            reply_markup=builder.as_markup()
         )
+        return
+    elif len(selected_variants) == len(locations):
+        await call.message.edit_text(
+            text="✅ Закончили с подбором билетов по путешествию. Дальше будет выбор обратных билетов (до вашего города)",
+            reply_markup=None
+        )
+        send_new_message = True
+        second_place = user.city
+        first_place = locations[-1].place
+    else:
+        first_place = locations[curr_ind].place
+        second_place = locations[next_ind].place
     
-    await msg.edit_text(
-        text="✈️ Собрал подборку авиабилетов. Авиасейлс - самые дешевые авиабилеты!",
-        reply_markup=builder.as_markup()
-    )
+    schedule = YandexSchedule(config.yandex_schedule_api_key)
+    variants = await schedule.get_trains(first_place, second_place, locations[curr_ind].date_end)
+    for variant in variants[:5]:
+        all_variants[variant['title']] = variant['link']
+        builder.row(
+            InlineKeyboardButton(text=variant['title'], callback_data=f"smv|train|{travel_id}|{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}")
+        )
+    if send_new_message:
+        await call.message.answer(
+            text="🚂 Продолжаем...",
+            reply_markup=builder.as_markup()
+        )
+    else:
+        await call.message.edit_text(
+            text="🚂 Продолжаем...",
+            reply_markup=builder.as_markup()
+        )
+    await call.answer("✅ Понял. Выбирайте дальше.")
+    await state.update_data(selected_variants=selected_variants, next_ind=next_ind + 1, 
+                            curr_ind=next_ind, all_variants=all_variants)

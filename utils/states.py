@@ -9,6 +9,9 @@ class RegisterStates(StatesGroup):
     ENTER_COUNTRY = State()
     ENTER_BIO = State()
 
+class SelectedVariant(StatesGroup):
+    ENTER_VARIANT = State()
+    
 
 class ProfileEditStates(StatesGroup):
     ENTER_DATA = State()
