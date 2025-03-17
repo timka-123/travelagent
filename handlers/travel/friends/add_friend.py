@@ -1,5 +1,5 @@
 from aiogram import F, Router, Bot
-from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message, switch_inline_query_chosen_chat
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.orm import create_session
@@ -15,12 +15,19 @@ async def request_contact(call: CallbackQuery, state: FSMContext):
     travel_id = int(call.data.split("|")[1])
     await state.set_state(AddFriendsStates.ENTER_CONTACT)
     builder = InlineKeyboardBuilder()
+    query = f"jointravel-{travel_id}"
     builder.add(
-        InlineKeyboardButton(text="❌ Отмена", callback_data=f"tinvite|{travel_id}")
+        InlineKeyboardButton(text="💠 Отправить", switch_inline_query_chosen_chat=switch_inline_query_chosen_chat.SwitchInlineQueryChosenChat(
+            query=f"https://t.me/T_TravelAgentBot?start={query} <- Перейди по этой ссылке, чтобы присоединиться к моему путешествию!",
+            allow_user_chats=True,
+            allow_group_chats=True,
+            allow_channel_chats=False,
+            allow_bot_chats=False
+        ))
     )
     await state.update_data(travel_id=travel_id)
-    await call.message.edit_text(
-        text="📇 Пришли мне контакт друга, которого нужно добавить. Обрати внимание, что друг должен зарегистрироваться в боте!",
+    await call.message.answer(
+        text="📇 Нажмите на кнопку ниже, чтобы отправить инвайт другу!",
         reply_markup=builder.as_markup()
     )
 

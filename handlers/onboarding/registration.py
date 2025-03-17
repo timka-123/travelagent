@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram import Router, F
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 
-from database import engine, User
+from database import engine, User, TravelMember, Travel
 from utils import RegisterStates, OpenStreetMapsClient
 
 
@@ -138,7 +138,7 @@ async def request_bio(message: Message, state: FSMContext):
 
 
 @router.message(RegisterStates.ENTER_BIO)
-async def create_user(message: Message, state: FSMContext):
+async def create_user(message: Message, state: FSMContext, bot):
     bio = message.text
     if len(bio) > 70:
         return await message.answer(
@@ -161,6 +161,42 @@ async def create_user(message: Message, state: FSMContext):
     )
     session.add(user)
     session.commit()
+
+    if data.get("travel_id"):
+        travel_id = data.get("travel_id")
+        travel = session.get(Travel, travel_id)
+        travel_member = session.query(TravelMember).filter_by(user_id=message.from_user.id).filter_by(travel_id=travel_id).first()
+        if travel_member:
+            return await message.answer(
+                text="Что-то пошло не так...",
+            )
+
+        travel_member = TravelMember(
+            user_id=message.from_user.id,
+            travel_id=travel_id
+        )
+        session.add(travel_member)
+        session.commit()
+
+        await message.answer(
+            text="✅ Вы добавлены в путешествие!",
+        )
+
+        # notify all members
+        members = session.query(TravelMember).filter_by(travel_id=travel_id).all()
+        for member in members:
+            try:
+                await bot.send_message(
+                    chat_id=member.user_id,
+                    text=f"""<b>🔔 В путешествие добавлен участник</b>
+                    
+🆔 Его ID: <code>{travel_member.user_id}</code>
+
+⚠️ Вы получили данное уведомление, поскольку Вы являетесь участником путешествия под названием <b>{travel.name}</b>"""
+                )
+            except:
+                ...
+
     session.close()
     await message.answer(
         text="✅ Вы зарегистрированы! Пропишите /start для открытия меню"
