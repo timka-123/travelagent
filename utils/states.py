@@ -11,6 +11,7 @@ class RegisterStates(StatesGroup):
 
 class SelectedVariant(StatesGroup):
     ENTER_VARIANT = State()
+    ENTER_HOTEL = State()
     
 
 class ProfileEditStates(StatesGroup):

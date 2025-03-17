@@ -44,6 +44,9 @@ async def travel_info(call: CallbackQuery, state: FSMContext):
         InlineKeyboardButton(text="🚂 Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
     )
     builder.row(
+        InlineKeyboardButton(text="🏡 Где пожить?", callback_data=f"gethotels|{travel_id}")
+    )
+    builder.row(
         InlineKeyboardButton(text="📝 Изменть название", callback_data=f"tedit|name|{travel_id}"),
         InlineKeyboardButton(text="📝 Изменть описание", callback_data=f"tedit|description|{travel_id}"),
     )
@@ -107,6 +110,9 @@ async def send_menu(message: Message, travel_id: int, travel: Travel, locations:
         InlineKeyboardButton(text="🚂 Найти поезда", callback_data=f"trainmarshrut|{travel_id}"),
     )
     builder.row(
+        InlineKeyboardButton(text="🏡 Где пожить?", callback_data=f"gethotels|{travel_id}")
+    )
+    builder.row(
         InlineKeyboardButton(text="📝 Изменить название", callback_data=f"tedit|name|{travel_id}"),
         InlineKeyboardButton(text="📝 Изменить описание", callback_data=f"tedit|description|{travel_id}"),
     )
@@ -133,6 +139,92 @@ async def send_menu(message: Message, travel_id: int, travel: Travel, locations:
     """,
         reply_markup=builder.as_markup()
     )
+
+
+@router.callback_query(F.data.startswith("gethotels|"))
+async def start_finding_hotels(call: CallbackQuery, state: FSMContext):
+    msg = await call.message.answer("<i>⏳ Ищу подходящие выгодные варианты, пожалуйста, подождите...</i>")
+    travel_id = int(call.data.split("|")[1])
+    session = create_session(engine)
+
+    locations = session.query(Location).filter_by(travel=travel_id).order_by(Location.date_start).all()
+    user = session.get(User, call.from_user.id)
+    session.close()
+    
+    schedule = YandexSchedule(config.yandex_schedule_api_key)
+    geo_name, geo_id = await schedule.get_slug_name(user.city)
+    variants = await schedule.get_hotels(geo_id, geo_name, locations[0].date_start, locations[0].date_end)
+    builder = InlineKeyboardBuilder()
+    variants_dict = {}
+    for variant in variants[:5]:
+        variant = variants["hotel"]
+        link = f"https://travel.yandex.ru/hotels/{variant['hotelSlug']}"
+        variants_dict[variant['name']] = link
+        builder.row(
+            InlineKeyboardButton(text=variant['name'], callback_data=f"selhotel|{travel_id}|{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}")
+        )
+    await msg.edit_text(
+        text="✈️ Нашел выгодные варианты, попробуйте!",
+        reply_markup=builder.as_markup()
+    )
+    await state.update_data(all_variants=variants_dict, next_ind=1, curr_ind=0, selected_variants={})
+    await state.set_state(SelectedVariant.ENTER_HOTEL)
+
+
+@router.callback_query(F.data.startswith("selhotel"), SelectedVariant.ENTER_VARIANT)
+async def selected_variant(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    travel_id = int(call.data.split("|")[-2])
+    selected_variants: dict[str, str] = data['selected_variants']
+    all_variants: dict[str, str] = data['all_variants']
+    next_ind: int = data['next_ind']
+    curr_ind: int = data['curr_ind']
+
+    for button in call.message.reply_markup.inline_keyboard:
+        button = button[0]
+        if button.callback_data == call.data:
+            selected_variants[button.text] = all_variants[button.text]
+
+    session = create_session(engine)
+
+    locations = session.query(Location).filter_by(travel=travel_id).order_by(Location.date_start).all()
+    session.close()
+
+    builder = InlineKeyboardBuilder()
+
+    if len(selected_variants) == len(locations) + 1:
+        for title, link in selected_variants.items():
+            builder.row(
+                InlineKeyboardButton(text=title, url=link)
+            )
+        await call.message.edit_text(
+            text='✅ Все, закончили! Ниже находятся ссылки на покупку выбранных отелей\n\nДанная функция работает по API сервисов <a href="https://travel.yandex.ru">Яндекс.Путешествия</a>',
+            reply_markup=builder.as_markup(),
+            disable_web_page_preview=True
+        )
+        return
+    else:
+        first_place = locations[curr_ind].place
+        second_place = locations[next_ind].place
+    
+    schedule = YandexSchedule(config.yandex_schedule_api_key)
+    geo_name, geo_id = await schedule.get_slug_name(first_place)
+    variants = await schedule.get_hotels(geo_id, geo_name, locations[curr_ind].date_start, locations[curr_ind].date_end)
+    if not variants:
+        await call.message.edit_text(
+            text=f"😔 Не удалось найти отель"
+        )
+        return
+    for variant in variants[:5]:
+        variant = variants["hotel"]
+        link = f"https://travel.yandex.ru/hotels/{variant['hotelSlug']}"
+        all_variants[variant['name']] = link
+        builder.row(
+            InlineKeyboardButton(text=variant['name'], callback_data=f"selhotel|{travel_id}|{''.join(random.choices(string.ascii_uppercase + string.digits, k=4))}")
+        )
+    await call.answer("✅ Понял. Можете выбирать дальше.")
+    await state.update_data(selected_variants=selected_variants, next_ind=next_ind + 1, 
+                            curr_ind=next_ind, all_variants=all_variants)
 
 
 @router.message(TravelEditStates.ENTER_NAME)

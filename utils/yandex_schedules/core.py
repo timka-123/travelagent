@@ -24,6 +24,14 @@ class YandexSchedule:
 
         self.base_url = "https://api.rasp.yandex.net/v3.0"
         self.private_api_url = "https://rasp.yandex.ru/api/batch"
+        self.travel_hotels_api_url = "https://travel.yandex.ru/api/hotels"
+
+    async def get_hotels(self, geo_id: int, geo_name: str, start_date: datetime, end_date: datetime):
+        response = await self.session.get(
+            url=f"{self.base_url}/searchHotels?startSearchReason=mount&mapAspectRatio=0.4429175475687104&pageHotelCount=25&pricedHotelLimit=26&totalHotelLimit=50&pollIteration=0&pollEpoch=0&adults=1&checkinDate={start_date.strftime('%Y-%m-%d')}&checkoutDate={end_date.strftime('%Y-%m-%d')}&geoId={geo_id}&geoLocationStatus=unknown&geoSlug={geo_name}&seoMode=search&searchOriginType=SEARCH"
+        )
+        data = await response.json()
+        return data["hotels"]
 
     async def get_nearest_station(self, lat: float, lon: float) -> NearestCity:
         """Get nearest city nearest provied lat/lon
